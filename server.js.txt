@@ -1,0 +1,122 @@
+import express from 'express';
+import cors from 'cors';
+import { sql } from '@vercel/postgres';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
+
+// Generate unique Complaint ID
+function generateId() {
+    const timestamp = Date.now();
+    const random = Math.random().toString(36).substr(2, 8).toUpperCase();
+    return `FTNT-${timestamp}-${random}`;
+}
+
+// ========== API ROUTES ==========
+
+// Get all complaints
+app.get('/api/complaints', async (req, res) => {
+    try {
+        const { rows } = await sql`
+            SELECT * FROM complaints 
+            ORDER BY created_at DESC
+        `;
+        res.json({ success: true, complaints: rows });
+    } catch (err) {
+        // If table doesn't exist yet, return empty array
+        if (err.message.includes('does not exist')) {
+            res.json({ success: true, complaints: [] });
+        } else {
+            res.json({ success: false, error: err.message });
+        }
+    }
+});
+
+// Get single complaint
+app.get('/api/complaints/:id', async (req, res) => {
+    try {
+        const { rows } = await sql`
+            SELECT * FROM complaints WHERE id = ${req.params.id}
+        `;
+        res.json({ success: true, complaint: rows[0] || null });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// Submit new complaint
+app.post('/api/complaints', async (req, res) => {
+    try {
+        const { name, email, subject, category, message } = req.body;
+        const complaintId = generateId();
+        const now = new Date().toLocaleString();
+        
+        await sql`
+            INSERT INTO complaints (id, name, email, subject, category, message, status, created_at)
+            VALUES (${complaintId}, ${name}, ${email}, ${subject}, ${category}, ${message}, 'Pending', ${now})
+        `;
+        
+        res.json({ success: true, id: complaintId });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// Add reply
+app.put('/api/complaints/:id/reply', async (req, res) => {
+    try {
+        const { reply } = req.body;
+        const now = new Date().toLocaleString();
+        
+        await sql`
+            UPDATE complaints 
+            SET reply = ${reply}, 
+                reply_date = ${now},
+                status = 'Replied'
+            WHERE id = ${req.params.id}
+        `;
+        res.json({ success: true });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// Mark resolved
+app.put('/api/complaints/:id/resolve', async (req, res) => {
+    try {
+        await sql`
+            UPDATE complaints 
+            SET status = 'Resolved'
+            WHERE id = ${req.params.id}
+        `;
+        res.json({ success: true });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// Delete complaint
+app.delete('/api/complaints/:id', async (req, res) => {
+    try {
+        await sql`
+            DELETE FROM complaints WHERE id = ${req.params.id}
+        `;
+        res.json({ success: true });
+    } catch (err) {
+        res.json({ success: false, error: err.message });
+    }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📁 Customer page: http://localhost:${PORT}`);
+    console.log(`🔒 Admin panel: http://localhost:${PORT}/admin.html`);
+});
